@@ -45,7 +45,7 @@ export default {
         },
       },
       fontFamily: {
-        display: ['"Clash Display"', 'system-ui', 'sans-serif'],
+        display: ['"Plus Jakarta Sans"', 'Inter', 'system-ui', 'sans-serif'],
         body: ['Inter', 'system-ui', 'sans-serif'],
       },
       borderRadius: {
