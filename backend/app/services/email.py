@@ -297,6 +297,42 @@ def _send_smtp_sync(subject: str, html_content: str, recipient: str) -> None:
         raise last_error or fallback_err
 
 
+def _send_resend_http(subject: str, html_content: str, recipient: str) -> None:
+    """Send email via Resend REST API over standard HTTPS (Port 443).
+    Bypasses cloud provider egress blocks on SMTP ports 25, 465, and 587.
+    """
+    import json
+    import urllib.request
+
+    recipient_list = [r.strip() for r in recipient.split(",") if r.strip()]
+    if not recipient_list:
+        return
+
+    url = "https://api.resend.com/emails"
+    from_addr = "Vetri Driving Academy <onboarding@resend.dev>"
+    payload = {
+        "from": from_addr,
+        "to": recipient_list,
+        "subject": subject,
+        "html": html_content,
+    }
+    data = json.dumps(payload).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=data,
+        headers={
+            "Authorization": f"Bearer {settings.resend_api_key.strip()}",
+            "Content-Type": "application/json",
+            "User-Agent": "VetriDrivingAcademy/1.0",
+        },
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=15) as resp:
+        if resp.status not in (200, 201):
+            body = resp.read().decode("utf-8", errors="ignore")
+            raise RuntimeError(f"Resend API error {resp.status}: {body}")
+
+
 # Resolve log path next to the backend .env file (absolute, not relative to CWD)
 _LOG_PATH = Path(__file__).resolve().parent.parent.parent / "enquiry_dispatches.log"
 
@@ -308,9 +344,9 @@ _LOG_PATH = Path(__file__).resolve().parent.parent.parent / "enquiry_dispatches.
 async def send_enquiry_notification_to_owner(enquiry: dict) -> bool:
     """Deliver an enquiry notification to the business owner/admin email.
 
-    If SMTP credentials are configured, sends real email via SMTP.
-    Also logs the complete formatted enquiry to `backend/enquiry_dispatches.log`
-    so no lead is ever lost.
+    1. Logs the formatted enquiry to local journal.
+    2. Dispatches via Resend REST API (over HTTPS Port 443) if RESEND_API_KEY is configured.
+    3. Otherwise falls back to SMTP if SMTP credentials are provided.
     """
     now_ist = datetime.now(IST).strftime("%d %b %Y, %I:%M %p")
     student_name = enquiry.get("name", "Student")
@@ -331,7 +367,19 @@ async def send_enquiry_notification_to_owner(enquiry: dict) -> bool:
     except Exception as log_err:
         logger.warning(f"Could not append to enquiry_dispatches.log: {log_err}")
 
-    # 2. Send via SMTP if configured
+    # 2. Try Resend HTTP API first (works over standard HTTPS Port 443, never blocked by Render)
+    if settings.resend_api_key:
+        try:
+            logger.info(
+                f"Dispatching owner notification via Resend HTTP API to {settings.admin_email}..."
+            )
+            await asyncio.to_thread(_send_resend_http, subject, html_content, settings.admin_email)
+            logger.info(f"✅ Owner notification email sent to {settings.admin_email} via Resend HTTP API")
+            return True
+        except Exception as resend_err:
+            logger.error(f"❌ Resend HTTP API dispatch failed: {resend_err}", exc_info=True)
+
+    # 3. Fallback to SMTP
     if settings.smtp_host and settings.smtp_user and settings.smtp_password:
         try:
             logger.info(
@@ -341,7 +389,7 @@ async def send_enquiry_notification_to_owner(enquiry: dict) -> bool:
             logger.info(f"✅ Owner notification email sent to {settings.admin_email}")
             return True
         except Exception as smtp_err:
-            logger.error(f"❌ Failed to send owner notification: {smtp_err}", exc_info=True)
+            logger.error(f"❌ Failed to send owner notification via SMTP: {smtp_err}", exc_info=True)
             return False
     else:
         logger.warning(
@@ -350,7 +398,7 @@ async def send_enquiry_notification_to_owner(enquiry: dict) -> bool:
             f"Student: {student_name} ({enquiry.get('phone')})\n"
             f"Course: {course}\n"
             f"Logged to: {_LOG_PATH}\n"
-            f"NOTE: Set SMTP_HOST, SMTP_USER & SMTP_PASSWORD in .env to send real emails.\n"
+            f"NOTE: Set RESEND_API_KEY (recommended for cloud) or SMTP_HOST in .env to send real emails.\n"
             f"======================================================================"
         )
         return False
@@ -411,6 +459,15 @@ def send_enquiry_confirmation_to_student_sync(enquiry: dict) -> bool:
     subject = f"[Vetri Driving Academy] Enquiry Received - {course}"
 
     html_content = _build_student_confirmation_html(enquiry, now_ist)
+
+    if settings.resend_api_key:
+        try:
+            logger.info(f"Sending confirmation email to student via Resend: {student_email}...")
+            _send_resend_http(subject, html_content, student_email)
+            logger.info(f"✅ Confirmation email sent to student via Resend: {student_email}")
+            return True
+        except Exception as resend_err:
+            logger.warning(f"Student confirmation via Resend failed: {resend_err}")
 
     if settings.smtp_host and settings.smtp_user and settings.smtp_password:
         try:

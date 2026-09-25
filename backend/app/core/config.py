@@ -31,6 +31,7 @@ class Settings(BaseSettings):
 
     # Admin / Business Owner Email Settings
     admin_email: str = "naveenkanakaraj2023@gmail.com"
+    resend_api_key: str = ""
     smtp_host: str = ""
     smtp_port: int = 587
     smtp_user: str = ""
