@@ -27,12 +27,20 @@ elif raw_url.startswith("postgresql://") and "+asyncpg" not in raw_url:
 
 url_obj = make_url(raw_url)
 if "asyncpg" in url_obj.drivername:
+    # Whitelist of valid connection arguments accepted by asyncpg.connect()
+    # Any libpq-specific parameters (sslmode, channel_binding, endpoint)
+    # cause TypeError: connect() got an unexpected keyword argument
+    asyncpg_allowed = {
+        "ssl", "timeout", "command_timeout", "statement_cache_size",
+        "max_cached_statement_lifetime", "max_cacheable_statement_size",
+        "server_settings", "target_session_attrs"
+    }
     query = dict(url_obj.query)
-    # asyncpg does not accept 'sslmode' keyword arg; it uses 'ssl'
     sslmode = query.pop("sslmode", None)
-    if sslmode:
+    if sslmode and "ssl" not in query:
         query["ssl"] = sslmode
-    url_obj = url_obj.set(query=query)
+    clean_query = {k: v for k, v in query.items() if k in asyncpg_allowed}
+    url_obj = url_obj.set(query=clean_query)
     db_url = url_obj.render_as_string(hide_password=False)
 else:
     db_url = raw_url
