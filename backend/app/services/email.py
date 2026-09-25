@@ -243,26 +243,58 @@ def _build_student_confirmation_html(enquiry: dict, timestamp_str: str) -> str:
 
 def _send_smtp_sync(subject: str, html_content: str, recipient: str) -> None:
     """Synchronous worker that connects to SMTP server and delivers the message."""
-    # Ensure recipient list is clean and RFC-compliant
     recipient_list = [r.strip() for r in recipient.split(",") if r.strip()]
     if not recipient_list:
         logger.warning("No valid recipient specified for SMTP dispatch.")
         return
 
+    smtp_host = settings.smtp_host.strip()
+    smtp_port = int(settings.smtp_port)
+    smtp_user = settings.smtp_user.strip()
+    smtp_password = settings.smtp_password.strip()
+    smtp_from = settings.smtp_from_email.strip()
+
     msg = MIMEMultipart("alternative")
     msg["Subject"] = Header(subject, "utf-8")
-    msg["From"] = f"Vetri Driving Academy <{settings.smtp_from_email}>"
+    msg["From"] = f"Vetri Driving Academy <{smtp_from}>"
     msg["To"] = ", ".join(recipient_list)
 
     part = MIMEText(html_content, "html", "utf-8")
     msg.attach(part)
 
-    with smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=15) as server:
-        if settings.smtp_use_tls:
-            server.starttls()
-        if settings.smtp_user and settings.smtp_password:
-            server.login(settings.smtp_user, settings.smtp_password)
-        server.sendmail(settings.smtp_from_email, recipient_list, msg.as_string())
+    # Direct port 465 if configured
+    if smtp_port == 465:
+        with smtplib.SMTP_SSL(smtp_host, 465, timeout=20) as server:
+            if smtp_user and smtp_password:
+                server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_from, recipient_list, msg.as_string())
+            return
+
+    # Try standard port (587 STARTTLS) with automatic fallback to port 465 SSL
+    last_error = None
+    try:
+        with smtplib.SMTP(smtp_host, smtp_port, timeout=15) as server:
+            if settings.smtp_use_tls:
+                server.starttls()
+            if smtp_user and smtp_password:
+                server.login(smtp_user, smtp_password)
+            server.sendmail(smtp_from, recipient_list, msg.as_string())
+            return
+    except Exception as primary_err:
+        last_error = primary_err
+        logger.warning(f"SMTP via port {smtp_port} failed: {primary_err}. Attempting port 465 SSL fallback...")
+
+    # Fallback to port 465 SSL
+    try:
+        with smtplib.SMTP_SSL(smtp_host, 465, timeout=20) as ssl_server:
+            if smtp_user and smtp_password:
+                ssl_server.login(smtp_user, smtp_password)
+            ssl_server.sendmail(smtp_from, recipient_list, msg.as_string())
+            logger.info("✅ SMTP dispatched successfully via port 465 SSL fallback.")
+            return
+    except Exception as fallback_err:
+        logger.error(f"SMTP port 465 fallback also failed: {fallback_err}")
+        raise last_error or fallback_err
 
 
 # Resolve log path next to the backend .env file (absolute, not relative to CWD)
