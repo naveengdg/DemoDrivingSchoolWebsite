@@ -71,6 +71,51 @@ async def root() -> dict[str, str]:
 
 
 @app.get("/api/health")
-async def health_check() -> dict[str, str]:
+async def health_check() -> dict:
     """Simple health check endpoint."""
-    return {"status": "healthy", "service": "vetri-driving-academy-api"}
+    return {
+        "status": "healthy",
+        "service": "vetri-driving-academy-api",
+        "has_smtp_host": bool(settings.smtp_host),
+        "has_smtp_user": bool(settings.smtp_user),
+        "has_smtp_password": bool(settings.smtp_password),
+        "admin_email": settings.admin_email,
+    }
+
+
+@app.get("/api/diag/email-status")
+async def email_diagnostic() -> dict:
+    """Check whether SMTP environment variables are loaded in production."""
+    return {
+        "has_smtp_host": bool(settings.smtp_host),
+        "smtp_host": settings.smtp_host,
+        "smtp_port": settings.smtp_port,
+        "has_smtp_user": bool(settings.smtp_user),
+        "smtp_user": settings.smtp_user if settings.smtp_user else None,
+        "has_smtp_password": bool(settings.smtp_password),
+        "smtp_password_len": len(settings.smtp_password) if settings.smtp_password else 0,
+        "admin_email": settings.admin_email,
+        "smtp_from_email": settings.smtp_from_email,
+        "smtp_use_tls": settings.smtp_use_tls,
+    }
+
+
+@app.post("/api/diag/test-email")
+async def test_email_dispatch() -> dict:
+    """Attempt an immediate test email dispatch and return detailed error if any."""
+    import traceback
+    from app.services.email import send_enquiry_notification_to_owner
+    test_data = {
+        "id": 999,
+        "name": "Diagnostic Lead",
+        "phone": "9876543210",
+        "email": settings.admin_email,
+        "course_interest": "LMV Car — Complete Beginner",
+        "message": "Testing production email delivery on Render",
+        "source_page": "Diagnostic Check",
+    }
+    try:
+        success = await send_enquiry_notification_to_owner(test_data)
+        return {"success": success}
+    except Exception as e:
+        return {"success": False, "error": str(e), "traceback": traceback.format_exc()}
