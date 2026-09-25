@@ -8,6 +8,7 @@ Role & Purpose:
 - Provides create_tables() utility executed during FastAPI application startup.
 """
 
+from sqlalchemy.engine.url import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
@@ -17,13 +18,26 @@ engine_kwargs: dict = {
     "echo": settings.app_env == "development",
 }
 
-# SQLite doesn't support pool_size / max_overflow
-db_url = settings.database_url
-if db_url.startswith("postgres://"):
-    db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
-elif db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
-    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+# Normalize database URL for async drivers
+raw_url = settings.database_url
+if raw_url.startswith("postgres://"):
+    raw_url = raw_url.replace("postgres://", "postgresql+asyncpg://", 1)
+elif raw_url.startswith("postgresql://") and "+asyncpg" not in raw_url:
+    raw_url = raw_url.replace("postgresql://", "postgresql+asyncpg://", 1)
 
+url_obj = make_url(raw_url)
+if "asyncpg" in url_obj.drivername:
+    query = dict(url_obj.query)
+    # asyncpg does not accept 'sslmode' keyword arg; it uses 'ssl'
+    sslmode = query.pop("sslmode", None)
+    if sslmode:
+        query["ssl"] = sslmode
+    url_obj = url_obj.set(query=query)
+    db_url = url_obj.render_as_string(hide_password=False)
+else:
+    db_url = raw_url
+
+# SQLite does not support connection pooling settings
 if "sqlite" not in db_url:
     engine_kwargs["pool_size"] = 5
     engine_kwargs["max_overflow"] = 10
