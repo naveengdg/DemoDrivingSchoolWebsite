@@ -59,6 +59,17 @@ app.include_router(reviews_router, prefix="/api")
 app.include_router(enquiries_router, prefix="/api")
 
 
+@app.get("/")
+async def root() -> dict[str, str]:
+    """Root endpoint welcoming visitors and linking to interactive docs."""
+    return {
+        "message": "Welcome to Vetri Driving Academy API",
+        "status": "online",
+        "documentation": "/docs",
+        "health": "/api/health",
+    }
+
+
 @app.get("/api/health")
 async def health_check() -> dict[str, str]:
     """Simple health check endpoint."""
