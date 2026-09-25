@@ -17,7 +17,8 @@ import type {
   Course,
 } from '@/types';
 
-const BASE_URL = '/api';
+const API_ORIGIN = (import.meta.env.VITE_API_URL as string | undefined)?.replace(/\/$/, '') || '';
+const BASE_URL = `${API_ORIGIN}/api`;
 
 interface ApiError {
   detail: string;

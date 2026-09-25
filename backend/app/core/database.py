@@ -18,12 +18,18 @@ engine_kwargs: dict = {
 }
 
 # SQLite doesn't support pool_size / max_overflow
-if "sqlite" not in settings.database_url:
+db_url = settings.database_url
+if db_url.startswith("postgres://"):
+    db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
+elif db_url.startswith("postgresql://") and "+asyncpg" not in db_url:
+    db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+if "sqlite" not in db_url:
     engine_kwargs["pool_size"] = 5
     engine_kwargs["max_overflow"] = 10
 
 engine = create_async_engine(
-    settings.database_url,
+    db_url,
     **engine_kwargs,
 )
 
